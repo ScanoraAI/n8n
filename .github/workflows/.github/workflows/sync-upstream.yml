@@ -1,0 +1,48 @@
+name: Sync upstream n8n
+
+on:
+  schedule:
+    - cron: '0 3 * * *'   # daily at 3am UTC — change to taste
+  workflow_dispatch: {}    # lets you trigger this manually from the Actions tab
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # IMPORTANT: must use a PAT here, not the default GITHUB_TOKEN.
+          # Pushes made with the default token do NOT trigger other workflows
+          # (incl. build-deploy.yml) — this is a GitHub anti-loop safeguard.
+          token: ${{ secrets.PAT_TOKEN }}
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/n8n-io/n8n.git
+          git fetch upstream
+
+      - name: Merge upstream changes
+        id: merge
+        run: |
+          git checkout master
+          git merge upstream/master --no-edit
+        continue-on-error: true
+
+      - name: Abort cleanly on conflict
+        if: steps.merge.outcome == 'failure'
+        run: |
+          echo "::error::Merge conflict syncing upstream n8n into your fork."
+          echo "::error::Resolve manually: git fetch upstream && git merge upstream/master"
+          git merge --abort
+          exit 1
+
+      - name: Push merged changes to fork
+        if: steps.merge.outcome == 'success'
+        run: git push origin master
