@@ -1,0 +1,57 @@
+name: Build and Deploy n8n
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch: {}
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable pnpm via corepack
+        run: corepack enable
+
+      - name: Install dependencies (full monorepo, needed to build)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build n8n and only its dependency graph
+        run: pnpm turbo run build --filter=n8n...
+
+      - name: Create flattened production-only bundle
+        run: pnpm --filter=n8n --prod deploy ./deploy-output
+
+      - name: Add Passenger entrypoint
+        run: cp deploy/app.js ./deploy-output/app.js
+
+      - name: Load deploy SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.CPANEL_SSH_KEY }}
+
+      - name: Trust cPanel host key
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -p ${{ secrets.CPANEL_SSH_PORT }} ${{ secrets.CPANEL_SSH_HOST }} >> ~/.ssh/known_hosts
+
+      - name: Sync build to cPanel
+        run: |
+          rsync -avz --delete \
+            --exclude='.env' \
+            --exclude='tmp/restart.txt' \
+            -e "ssh -p ${{ secrets.CPANEL_SSH_PORT }}" \
+            ./deploy-output/ \
+            ${{ secrets.CPANEL_SSH_USER }}@${{ secrets.CPANEL_SSH_HOST }}:${{ secrets.CPANEL_APP_PATH }}/
+
+      - name: Restart app (Passenger)
+        run: |
+          ssh -p ${{ secrets.CPANEL_SSH_PORT }} ${{ secrets.CPANEL_SSH_USER }}@${{ secrets.CPANEL_SSH_HOST }} \
+            "mkdir -p ${{ secrets.CPANEL_APP_PATH }}/tmp && touch ${{ secrets.CPANEL_APP_PATH }}/tmp/restart.txt"
