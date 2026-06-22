@@ -32,7 +32,6 @@ jobs:
           cd ./deploy-output
           pnpm install --prod --no-frozen-lockfile --shamefully-hoist
 
-      # Create a basic lightweight compose stack inside the runner to ship to Oracle
       - name: Prepare Docker Configuration
         run: |
           cat << 'EOF' > ./deploy-output/docker-compose.yml
@@ -46,10 +45,9 @@ jobs:
                 - NODE_ENV=production
                 - NODE_OPTIONS=--max-old-space-size=512
                 - N8N_PORT=5678
-              volumes:
-                - ./n8n_data:/home/node/.n8n
               working_dir: /app
               volumes:
+                - ./n8n_data:/home/node/.n8n
                 - .:/app
               command: node packages/cli/bin/n8n
           EOF
