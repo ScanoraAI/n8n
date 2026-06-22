@@ -49,7 +49,7 @@ jobs:
               volumes:
                 - ./n8n_data:/home/node/.n8n
                 - .:/app
-              command: node packages/cli/bin/n8n
+              command: node bin/n8n
           EOF
 
       - name: Load deploy SSH key
