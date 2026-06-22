@@ -44,7 +44,7 @@ jobs:
 
       - name: Sync build to cPanel
         run: |
-          rsync -avz --delete \
+          rsync -avzL --delete \
             --exclude='.env' \
             --exclude='tmp/restart.txt' \
             -e "ssh -p ${{ secrets.CPANEL_SSH_PORT }}" \
