@@ -29,6 +29,9 @@ jobs:
       - name: Create flattened production-only bundle
         run: pnpm --filter=n8n --prod deploy --legacy ./deploy-output
 
+      - name: Re-install deps with npm for clean flat structure
+        run: cd ./deploy-output && npm install --omit=dev --ignore-scripts
+
       - name: Add Passenger entrypoint
         run: cp deploy/app.js ./deploy-output/app.js
 
