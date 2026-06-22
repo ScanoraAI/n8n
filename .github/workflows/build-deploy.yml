@@ -32,6 +32,9 @@ jobs:
       - name: Re-install deps with npm for clean flat structure
         run: cd ./deploy-output && npm install --omit=dev --ignore-scripts
 
+      - name: Check semver in deploy output
+        run: ls -la ./deploy-output/node_modules/semver/
+
       - name: Add Passenger entrypoint
         run: cp deploy/app.js ./deploy-output/app.js
 
