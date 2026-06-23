@@ -1,74 +1,75 @@
-name: Build and Deploy n8n
+name: CI/CD Build and Deploy to Oracle
 
 on:
   push:
-    branches: [master]
-  workflow_dispatch: {}
+    branches:
+      - main
 
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
+      - name: Setup Directory Structure
+        run: mkdir -p ./deploy-output
 
-      - name: Enable pnpm via corepack
-        run: corepack enable
-
-      - name: Install dependencies (full monorepo, needed to build)
-        run: pnpm install --frozen-lockfile
-
-      - name: Build n8n and only its dependency graph
-        run: pnpm turbo run build --filter=n8n...
-
-      - name: Create flattened production-only bundle
-        run: |
-          pnpm --filter=n8n --prod deploy --legacy ./deploy-output
-          cd ./deploy-output
-          pnpm install --prod --no-frozen-lockfile --shamefully-hoist
-
+      # Create a basic lightweight compose stack inside the runner to ship to Oracle
       - name: Prepare Docker Configuration
         run: |
           cat << 'EOF' > ./deploy-output/docker-compose.yml
           services:
             n8n:
-              image: node:24-alpine
+              image: node:24-bookworm-slim
               restart: always
-              ports:
-                - "5678:5678"
               environment:
                 - NODE_ENV=production
                 - NODE_OPTIONS=--max-old-space-size=512
                 - N8N_PORT=5678
+                - N8N_LISTEN_ADDRESS=0.0.0.0
+                - WEBHOOK_URL=https://n8n.scanoraai.com/
+                - N8N_ENCRYPTION_KEY_VOLUME=/home/node/.n8n/
               working_dir: /app
               volumes:
                 - ./n8n_data:/home/node/.n8n
                 - .:/app
               command: node bin/n8n
+
+            caddy:
+              image: caddy:2-alpine
+              restart: always
+              ports:
+                - "80:80"
+                - "443:443"
+              volumes:
+                - ./caddy_data:/data
+                - ./caddy_config:/config
+              environment:
+                - DOMAIN=n8n.scanoraai.com
+              command: caddy reverse-proxy --from https://n8n.scanoraai.com --to n8n:5678
           EOF
 
-      - name: Load deploy SSH key
-        uses: webfactory/ssh-agent@v0.9.0
+      - name: Copy files to Oracle Cloud Instance
+        uses: appleboy/scp-action@master
         with:
-          ssh-private-key: ${{ secrets.ORACLE_SSH_KEY }}
+          host: 161.118.177.83
+          username: ubuntu
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          source: "./deploy-output/docker-compose.yml"
+          target: "~/n8n-app"
+          strip_components: 1
 
-      - name: Trust Oracle Cloud host key
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H ${{ secrets.ORACLE_HOST }} >> ~/.ssh/known_hosts
-
-      - name: Sync build to Oracle Cloud
-        run: |
-          rsync -avzL --delete \
-            -e "ssh" \
-            ./deploy-output/ \
-            ubuntu@${{ secrets.ORACLE_HOST }}:~/n8n-app/
-
-      - name: Boot up n8n via Docker Compose on Oracle
-        run: |
-          ssh ubuntu@${{ secrets.ORACLE_HOST }} "cd ~/n8n-app && docker compose up -d"
+      - name: SSH into Oracle and Restart Containers
+        uses: appleboy/ssh-action@master
+        with:
+          host: 161.118.177.83
+          username: ubuntu
+          key: ${{ secrets.ORACLE_SSH_KEY }}
+          script: |
+            cd ~/n8n-app
+            sudo chown -R 1000:1000 ~/n8n-app/n8n_data
+            sudo chmod -R 777 ~/n8n-app/n8n_data
+            docker compose down
+            docker compose up -d --force-recreate
